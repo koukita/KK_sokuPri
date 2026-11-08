@@ -1,3 +1,4 @@
+# 数値計算とファイル操作に必要な標準機能を読み込む。
 import math
 import os
 
@@ -18,6 +19,7 @@ from qgis.gui import QgsMapTool, QgsRubberBand
 
 
 def enum_value(owner, *names, default=None):
+    """QGISのバージョン差を吸収して列挙値を取得する。"""
     for name in names:
         value = owner
         try:
@@ -30,6 +32,7 @@ def enum_value(owner, *names, default=None):
 
 
 def qt_enum(owner, *names, default=None):
+    """Qtの列挙値を新旧両方の書き方に対応して取得する。"""
     try:
         return enum_value(owner, *names, default=default)
     except AttributeError:
@@ -40,6 +43,7 @@ def qt_enum(owner, *names, default=None):
 
 
 def log_exception(message, error):
+    """エラー内容をQGISのログへ記録する。"""
     QgsMessageLog.logMessage(
         "{}: {}".format(message, error),
         "KK_sokuPri",
@@ -48,6 +52,7 @@ def log_exception(message, error):
 
 
 PAPER_SIZES_MM = {
+    # 用紙名を幅・高さ（ミリメートル）へ変換するための一覧。
     "A5": (148.0, 210.0),
     "A4": (210.0, 297.0),
     "A3": (297.0, 420.0),
@@ -61,12 +66,14 @@ PAPER_SIZES_MM = {
 }
 
 PT_TO_MM = 25.4 / 72.0
+# 印刷時の余白も単位を揃えるため、ポイントからミリメートルへ変換する。
 SIDE_MARGIN_MM = 20.0 * PT_TO_MM
 TOP_MARGIN_MM = 40.0 * PT_TO_MM
 BOTTOM_MARGIN_MM = 20.0 * PT_TO_MM
 
 
 class PrintPreviewMapTool(QgsMapTool):
+    """地図上で印刷範囲を選ぶためのマウス操作を処理するクラス。"""
     def __init__(self, canvas, plugin):
         super().__init__(canvas)
         self.plugin = plugin
@@ -78,11 +85,13 @@ class PrintPreviewMapTool(QgsMapTool):
         self.setCursor(qt_enum(Qt, "CursorShape.CrossCursor", "CrossCursor"))
 
     def canvasMoveEvent(self, event):
+        # マウスを動かすと、カーソル位置を印刷範囲の中心として枠を更新する。
         point = self.toMapCoordinates(event.pos())
         self._center = point
         self._update_preview(point)
 
     def canvasPressEvent(self, event):
+        # 左クリックされた位置で確認画面を表示し、OKならPDFを作成する。
         if event.button() != qt_enum(Qt, "MouseButton.LeftButton", "LeftButton"):
             return
         center = self.toMapCoordinates(event.pos())
@@ -90,6 +99,7 @@ class PrintPreviewMapTool(QgsMapTool):
             self.plugin.print_at(center)
 
     def _update_preview(self, center):
+        # 印刷範囲の四角形を地図キャンバス上に赤線で表示する。
         rectangle = self.plugin.sheet_rectangle(center)
         if rectangle is None:
             self.rubber_band.hide()
@@ -113,12 +123,14 @@ class PrintPreviewMapTool(QgsMapTool):
 
 
 class KK_sokuPriDock(QWidget):
+    """プラグインの設定パネルに表示する入力項目を作るクラス。"""
     settings_changed = None
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QFormLayout(self)
 
+        # タイトル文字列を入力する欄を作る。
         from qgis.PyQt.QtWidgets import QLineEdit
         self.title_edit = QLineEdit()
         layout.addRow("タイトル", self.title_edit)
@@ -126,6 +138,7 @@ class KK_sokuPriDock(QWidget):
         self.font_combo = QComboBox()
         self.font_combo.setEditable(False)
         try:
+            # QGISに登録されたフォント一覧を取得し、選択ボックスへ追加する。
             font_database = QFontDatabase()
             font_families = font_database.families()
         except TypeError:
@@ -149,6 +162,7 @@ class KK_sokuPriDock(QWidget):
             project = QgsProject.instance()
             scales = project.readListEntry("ScaleBar", "/PredefinedScales", [])[0]
         if not scales:
+            # プロジェクトに縮尺がない場合は、よく使われる縮尺を用意する。
             scales = [
                 500, 1000, 2000, 2500, 5000, 10000, 20000, 25000,
                 50000, 100000, 250000, 500000, 1000000
@@ -164,6 +178,7 @@ class KK_sokuPriDock(QWidget):
         self.scale_combo.setEditText("50000")
         layout.addRow("縮尺", self.scale_combo)
 
+        # 用紙サイズと方向を選択する欄を作る。
         self.paper_combo = QComboBox()
         self.paper_combo.addItems(list(PAPER_SIZES_MM.keys()))
         self.paper_combo.setCurrentText("A4")
@@ -190,6 +205,7 @@ class KK_sokuPriDock(QWidget):
 
 
 class KK_sokuPri:
+    """QGISへプラグインを登録し、PDF印刷処理全体を管理するクラス。"""
     def __init__(self, iface):
         self.iface = iface
         self.plugin_dir = os.path.dirname(__file__)
@@ -203,6 +219,7 @@ class KK_sokuPri:
         self.preview_tool = None
 
     def initGui(self):
+        # プラグイン起動時に、メニューとツールバーへボタンを追加する。
         icon_path = os.path.join(self.plugin_dir, "icon.png")
         icon = QIcon(icon_path)
         action = QAction(icon, "KK_sokuPri 即PDFプリント", self.iface.mainWindow())
@@ -212,6 +229,7 @@ class KK_sokuPri:
         self.actions.append(action)
 
     def unload(self):
+        # プラグイン終了時に、追加したツールやパネルを取り除く。
         self.stop_preview()
         if self.preview_tool is not None:
             try:
@@ -229,6 +247,7 @@ class KK_sokuPri:
         return QCoreApplication.translate("KK_sokuPri", message)
 
     def toggle_dock(self):
+        # 設定パネルが未作成なら作成し、すでにあるなら表示・非表示を切り替える。
         if self.dock_widget is None:
             self.dock = KK_sokuPriDock()
             self.dock.title_edit.textChanged.connect(self.refresh_preview)
@@ -253,6 +272,7 @@ class KK_sokuPri:
             self.dock_widget.setVisible(not self.dock_widget.isVisible())
 
     def _load_project_copyright(self):
+        # 著作権表示に使う文字を、地図デコレーションやプロジェクト設定から探す。
         project = QgsProject.instance()
         copyright_text = ""
 
@@ -304,6 +324,7 @@ class KK_sokuPri:
         self.dock.copyright_edit.setText(copyright_text)
 
     def _copyright_text_from_xml_element(self, element):
+        # プロジェクトのXML内を再帰的に調べて著作権文字列を探す。
         if element.isNull():
             return ""
         for attribute_name in ("text", "label", "value"):
@@ -330,6 +351,7 @@ class KK_sokuPri:
         return ""
 
     def _dock_visibility_changed(self, visible):
+        # 設定パネルが表示されたら地図ツールを有効化し、隠れたら解除する。
         if visible:
             self.start_preview()
         else:
@@ -346,16 +368,19 @@ class KK_sokuPri:
             self.iface.mapCanvas().setCursor(qt_enum(Qt, "CursorShape.ArrowCursor", "ArrowCursor"))
 
     def refresh_preview(self, *_args):
+        # 設定が変更されたら印刷範囲のプレビューを再描画する。
         if self.preview_tool is not None:
             self.preview_tool.refresh()
 
     def paper_size(self):
+        # 選択された用紙サイズを、縦・横の向きを反映した寸法で返す。
         width, height = PAPER_SIZES_MM[self.dock.paper_combo.currentText()]
         if self.dock.orientation_combo.currentText() == "横":
             width, height = height, width
         return width, height
 
     def scale_denominator(self):
+        # 入力欄の縮尺文字を数値へ変換する。無効な値なら既定値を使う。
         text = self.dock.scale_combo.currentText().replace(",", "").strip()
         try:
             scale = float(text)
@@ -367,9 +392,11 @@ class KK_sokuPri:
             return 50000.0
 
     def print_dpi(self):
+        # 印刷解像度を72〜1200 dpiの範囲に収める。
         return max(72, min(1200, int(self.dock.dpi_spin.value())))
 
     def meters_per_crs_unit(self):
+        # 地図座標系の1単位が何メートルかを求める。
         crs = self.iface.mapCanvas().mapSettings().destinationCrs()
         try:
             distance_meters = QgsUnitTypes.DistanceUnit.DistanceMeters
@@ -396,6 +423,7 @@ class KK_sokuPri:
         return 1.0
 
     def sheet_extent(self, center):
+        # 用紙に収まる地図範囲を、選択された縮尺から計算する。
         try:
             width_mm, height_mm = self.paper_size()
             scale = self.scale_denominator()
@@ -421,6 +449,7 @@ class KK_sokuPri:
             return None
 
     def sheet_rectangle(self, center):
+        # プレビュー用の、用紙全体に近い四角形を計算する。
         map_extent = self.sheet_extent(center)
         if map_extent is None:
             return None
@@ -437,6 +466,7 @@ class KK_sokuPri:
         )
 
     def preview_geometry(self, rectangle, center):
+        # 地図の回転に対応して、印刷範囲を画面上の四角形へ変換する。
         canvas_settings = self.iface.mapCanvas().mapSettings()
         unrotated_settings = QgsMapSettings(canvas_settings)
         unrotated_settings.setRotation(0.0)
@@ -472,6 +502,7 @@ class KK_sokuPri:
         return QgsGeometry.fromPolygonXY([map_corners])
 
     def confirm_print(self, center):
+        # PDFを作成する前に、ユーザーへ確認ダイアログを表示する。
         answer = QMessageBox.question(
             self.iface.mainWindow(),
             "KK_sokuPri",
@@ -483,6 +514,7 @@ class KK_sokuPri:
         return answer == qt_enum(QMessageBox, "StandardButton.Yes", "Yes")
 
     def print_at(self, center):
+        # PDF作成処理を呼び出し、失敗した場合は利用者へ通知する。
         try:
             self._print_to_pdf(center)
         except Exception as error:
@@ -490,11 +522,13 @@ class KK_sokuPri:
             QMessageBox.critical(self.iface.mainWindow(), "KK_sokuPri", "PDFを作成できませんでした。\n{}".format(error))
 
     def _printer_orientation(self):
+        # Qtの用紙方向設定へ、選択した「縦」または「横」を変換する。
         if self.dock.orientation_combo.currentText() == "横":
             return qt_enum(QPageLayout, "Orientation.Landscape", "Landscape", default=1)
         return qt_enum(QPageLayout, "Orientation.Portrait", "Portrait", default=0)
 
     def _printer_page_size(self):
+        # 選択された用紙サイズを、QPrinterで使用する形式へ変換する。
         page_size_id = qt_enum(
             QPageSize,
             "PageSizeId.{}".format(self.dock.paper_combo.currentText()),
@@ -511,6 +545,7 @@ class KK_sokuPri:
         return QPageSize(page_size_id)
 
     def _print_to_pdf(self, center):
+        # タイトル、地図、方位記号、縮尺を配置してPDFを作成する。
         width_mm, height_mm = self.paper_size()
         default_name = "KK_sokuPri.pdf"
         if self.dock.title_edit.text().strip():
@@ -545,6 +580,7 @@ class KK_sokuPri:
             if not painter.begin(printer):
                 raise RuntimeError("PDF出力を開始できませんでした。")
 
+            # タイトルを紙面の上部中央へ20ptで描画する。
             title = self.dock.title_edit.text().strip()
             title_font = QFont(self.dock.font_combo.currentText())
             title_font.setPointSize(20)
@@ -566,6 +602,7 @@ class KK_sokuPri:
             map_width = (width_mm - 2.0 * SIDE_MARGIN_MM) / 25.4 * printer.resolution()
             map_height = (height_mm - TOP_MARGIN_MM - BOTTOM_MARGIN_MM - 28.0 * PT_TO_MM) / 25.4 * printer.resolution()
 
+            # 現在の地図表示設定をコピーし、印刷範囲とサイズを上書きする。
             map_settings = QgsMapSettings(self.iface.mapCanvas().mapSettings())
             map_settings.setExtent(self.sheet_extent(center))
             map_settings.setOutputSize(QSize(int(map_width), int(map_height)))
@@ -585,6 +622,7 @@ class KK_sokuPri:
             )
             if image_format is None:
                 raise RuntimeError("PDF用地図画像の形式を取得できませんでした。")
+            # 地図画像を一時的に作成し、レイヤーを描画する。
             map_image = QImage(int(map_width), int(map_height), image_format)
             map_image.fill(QColor("#ffffff"))
             image_painter = QPainter(map_image)
@@ -603,6 +641,7 @@ class KK_sokuPri:
 
             jpeg_path = "{}.map.jpg".format(os.path.splitext(file_path)[0])
             try:
+                # PDFへ埋め込むため、一時JPEG画像として保存する。
                 if not map_image.save(jpeg_path, "JPG", 90):
                     raise RuntimeError("PDF用地図画像をJPEGに変換できませんでした。")
                 jpeg_image = QImage(jpeg_path)
@@ -625,6 +664,7 @@ class KK_sokuPri:
             painter.setPen(QPen(QColor("#000000"), frame_width, qt_enum(Qt, "PenStyle.SolidLine", "SolidLine", default=1)))
             painter.setBrush(qt_enum(Qt, "BrushStyle.NoBrush", "NoBrush"))
             painter.drawRect(int(map_x), int(map_y), int(map_width), int(map_height))
+            # 地図枠の中に方位記号を、下側に縮尺と著作権表示を追加する。
             self.draw_north_arrow(painter, map_x, map_y, map_width, map_height, printer.resolution())
             self.draw_scale_elements(painter, map_x, map_y + map_height, map_width, printer.resolution())
             self.draw_project_copyright(painter, map_x, map_y + map_height, map_width, printer.resolution())
@@ -636,6 +676,7 @@ class KK_sokuPri:
         QMessageBox.information(self.iface.mainWindow(), "KK_sokuPri", "PDFを作成しました。\n{}".format(file_path))
 
     def draw_north_arrow(self, painter, map_x, map_y, map_width, map_height, dpi):
+        # 地図右上へ、地図の回転に合わせた青色の方位記号を描く。
         mm = dpi / 25.4
         scale = 0.70
         arrow_width = int(15.0 * mm * scale)
@@ -705,6 +746,7 @@ class KK_sokuPri:
         painter.restore()
 
     def draw_scale_elements(self, painter, map_x, map_bottom, map_width, dpi):
+        # 地図の縮尺に合う長さのスケールバーと「S=1/...」を描く。
         map_x = int(map_x)
         map_bottom = int(map_bottom)
         map_width = int(map_width)
@@ -756,6 +798,7 @@ class KK_sokuPri:
         )
 
     def draw_project_copyright(self, painter, map_x, map_bottom, map_width, dpi):
+        # 著作権ラベルが設定されている場合だけ、地図下部右側へ描画する。
         copyright_text = self.dock.copyright_edit.text().strip()
 
         if not copyright_text:
