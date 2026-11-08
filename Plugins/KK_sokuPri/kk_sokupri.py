@@ -125,8 +125,12 @@ class KK_sokuPriDock(QWidget):
 
         self.font_combo = QComboBox()
         self.font_combo.setEditable(False)
-        font_database = QFontDatabase()
-        self.font_combo.addItems(font_database.families())
+        try:
+            font_database = QFontDatabase()
+            font_families = font_database.families()
+        except TypeError:
+            font_families = QFontDatabase.families()
+        self.font_combo.addItems(font_families)
         general_font = qt_enum(
             QFontDatabase,
             "SystemFont.GeneralFont",
@@ -368,7 +372,7 @@ class KK_sokuPri:
     def meters_per_crs_unit(self):
         crs = self.iface.mapCanvas().mapSettings().destinationCrs()
         try:
-            distance_meters = QgsUnitTypes.DistanceMeters
+            distance_meters = QgsUnitTypes.DistanceUnit.DistanceMeters
             factor = QgsUnitTypes.fromUnitToUnitFactor(crs.mapUnits(), distance_meters)
             if factor > 0:
                 return factor
@@ -382,7 +386,7 @@ class KK_sokuPri:
             da.setEllipsoid(QgsProject.instance().ellipsoid())
         except AttributeError:
             pass
-        if crs.mapUnits() == QgsUnitTypes.DistanceDegrees:
+        if crs.mapUnits() == QgsUnitTypes.DistanceUnit.DistanceDegrees:
             from qgis.core import QgsPointXY
             meter_distance = da.measureLine(
                 QgsPointXY(center.x() - 0.5, center.y()),
@@ -485,10 +489,26 @@ class KK_sokuPri:
             log_exception("PDFの作成中にエラーが発生しました", error)
             QMessageBox.critical(self.iface.mainWindow(), "KK_sokuPri", "PDFを作成できませんでした。\n{}".format(error))
 
-    def _printer_orientation(self, printer):
+    def _printer_orientation(self):
         if self.dock.orientation_combo.currentText() == "横":
-            return qt_enum(QPrinter, "Orientation.Landscape", "Landscape", default=1)
-        return qt_enum(QPrinter, "Orientation.Portrait", "Portrait", default=0)
+            return qt_enum(QPageLayout, "Orientation.Landscape", "Landscape", default=1)
+        return qt_enum(QPageLayout, "Orientation.Portrait", "Portrait", default=0)
+
+    def _printer_page_size(self):
+        page_size_id = qt_enum(
+            QPageSize,
+            "PageSizeId.{}".format(self.dock.paper_combo.currentText()),
+            self.dock.paper_combo.currentText()
+        )
+        if page_size_id is None:
+            width_mm, height_mm = PAPER_SIZES_MM[self.dock.paper_combo.currentText()]
+            return QPageSize(
+                QSizeF(width_mm, height_mm),
+                qt_enum(QPageSize, "Unit.Millimeter", "Millimeter"),
+                "",
+                qt_enum(QPageSize, "SizeMatchPolicy.ExactMatch", "ExactMatch")
+            )
+        return QPageSize(page_size_id)
 
     def _print_to_pdf(self, center):
         width_mm, height_mm = self.paper_size()
@@ -509,21 +529,12 @@ class KK_sokuPri:
 
         printer = QPrinter(qt_enum(QPrinter, "PrinterMode.HighResolution", "HighResolution"))
         printer.setFullPage(True)
-        printer.setOrientation(self._printer_orientation(printer))
         printer.setOutputFormat(qt_enum(QPrinter, "OutputFormat.PdfFormat", "PdfFormat"))
         printer.setOutputFileName(file_path)
         printer.setResolution(self.print_dpi())
-
-        width_mm, height_mm = self.paper_size()
-        page_size = QPageSize(
-            QSizeF(width_mm, height_mm),
-            qt_enum(QPageSize, "Unit.Millimeter", "Millimeter"),
-            "",
-            qt_enum(QPageSize, "SizeMatchPolicy.ExactMatch", "ExactMatch")
-        )
         page_layout = QPageLayout(
-            page_size,
-            qt_enum(QPageLayout, "Orientation.Portrait", "Portrait"),
+            self._printer_page_size(),
+            self._printer_orientation(),
             QMarginsF(0.0, 0.0, 0.0, 0.0),
             qt_enum(QPageLayout, "Unit.Millimeter", "Millimeter")
         )
@@ -537,10 +548,6 @@ class KK_sokuPri:
             title = self.dock.title_edit.text().strip()
             title_font = QFont(self.dock.font_combo.currentText())
             title_font.setPointSize(20)
-            title_font.setLetterSpacing(
-                qt_enum(QFont, "SpacingType.AbsoluteSpacing", "AbsoluteSpacing"),
-                0.5 * printer.resolution() / 72.0
-            )
             painter.setFont(title_font)
             painter.setPen(qt_enum(Qt, "GlobalColor.black", "black"))
             title_y = int((8.0 - 10.0 * PT_TO_MM) * printer.resolution() / 25.4)
@@ -553,18 +560,17 @@ class KK_sokuPri:
                 qt_enum(Qt, "AlignmentFlag.AlignTop", "AlignTop"),
                 title
             )
+
             map_x = SIDE_MARGIN_MM / 25.4 * printer.resolution()
             map_y = TOP_MARGIN_MM / 25.4 * printer.resolution()
             map_width = (width_mm - 2.0 * SIDE_MARGIN_MM) / 25.4 * printer.resolution()
-            map_height = (height_mm - TOP_MARGIN_MM - BOTTOM_MARGIN_MM - (28.0 * PT_TO_MM)) / 25.4 * printer.resolution()
-            if map_height < printer.resolution() / 25.4:
-                map_height = printer.resolution() / 25.4
+            map_height = (height_mm - TOP_MARGIN_MM - BOTTOM_MARGIN_MM - 28.0 * PT_TO_MM) / 25.4 * printer.resolution()
 
             map_settings = QgsMapSettings(self.iface.mapCanvas().mapSettings())
             map_settings.setExtent(self.sheet_extent(center))
             map_settings.setOutputSize(QSize(int(map_width), int(map_height)))
-            map_settings.setDestinationCrs(self.iface.mapCanvas().mapSettings().destinationCrs())
             map_settings.setOutputDpi(printer.resolution())
+            map_settings.setDestinationCrs(self.iface.mapCanvas().mapSettings().destinationCrs())
             map_settings.setLayers(self.iface.mapCanvas().mapSettings().layers())
             try:
                 map_settings.setRotation(float(self.iface.mapCanvas().mapSettings().rotation()))
@@ -594,15 +600,31 @@ class KK_sokuPri:
                         )
             finally:
                 image_painter.end()
-            painter.drawImage(int(map_x), int(map_y), map_image)
 
+            jpeg_path = "{}.map.jpg".format(os.path.splitext(file_path)[0])
+            try:
+                if not map_image.save(jpeg_path, "JPG", 90):
+                    raise RuntimeError("PDF用地図画像をJPEGに変換できませんでした。")
+                jpeg_image = QImage(jpeg_path)
+                if jpeg_image.isNull():
+                    raise RuntimeError("JPEGに変換したPDF用地図画像を読み込めませんでした。")
+                painter.drawImage(
+                    int(map_x),
+                    int(map_y),
+                    jpeg_image.scaled(
+                        int(map_width),
+                        int(map_height),
+                        qt_enum(Qt, "AspectRatioMode.IgnoreAspectRatio", "IgnoreAspectRatio"),
+                        qt_enum(Qt, "TransformationMode.SmoothTransformation", "SmoothTransformation")
+                    )
+                )
+            finally:
+                if os.path.isfile(jpeg_path):
+                    os.remove(jpeg_path)
             frame_width = max(1, int(round(0.3 / 25.4 * printer.resolution())))
             painter.setPen(QPen(QColor("#000000"), frame_width, qt_enum(Qt, "PenStyle.SolidLine", "SolidLine", default=1)))
             painter.setBrush(qt_enum(Qt, "BrushStyle.NoBrush", "NoBrush"))
-            painter.drawRect(
-                int(map_x), int(map_y),
-                int(map_width), int(map_height)
-            )
+            painter.drawRect(int(map_x), int(map_y), int(map_width), int(map_height))
             self.draw_north_arrow(painter, map_x, map_y, map_width, map_height, printer.resolution())
             self.draw_scale_elements(painter, map_x, map_y + map_height, map_width, printer.resolution())
             self.draw_project_copyright(painter, map_x, map_y + map_height, map_width, printer.resolution())
@@ -625,10 +647,16 @@ class KK_sokuPri:
         outer_radius = int(7.0 * mm * scale)
 
         painter.save()
+        clip_operation = qt_enum(
+            Qt,
+            "ClipOperation.IntersectClip",
+            "IntersectClip",
+            default=qt_enum(QPainter, "ClipOperation.IntersectClip", "IntersectClip")
+        )
         painter.setClipRect(
             int(map_x), int(map_y),
             int(map_width), int(map_height),
-            qt_enum(QPainter, "ClipOperation.IntersectClip", "IntersectClip", default=1)
+            clip_operation
         )
         try:
             rotation = float(self.iface.mapCanvas().mapSettings().rotation())
