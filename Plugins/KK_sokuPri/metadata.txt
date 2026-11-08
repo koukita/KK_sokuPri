@@ -1,0 +1,21 @@
+[general]
+name=KK_sokuPri
+qgisMinimumVersion=3.40
+qgisMaximumVersion=4.99
+description=QGIS map canvas quick printer
+about=Displays a movable print frame on the map canvas and sends the selected map directly to the default printer.
+version=0.9.0
+author=kouichi kita
+
+email=qgisshitumon@gmail.com
+homepage=https://github.com/koukita/KK_sokuPri
+tracker=https://github.com/koukita/KK_sokuPri/issues/
+repository=https://github.com/koukita/KK_sokuPri
+
+icon=icon.png
+
+tags=printing, map, print
+category=Plugins
+
+changelog=
+    0.9.0 - 2026-11-08 - 初版公開
